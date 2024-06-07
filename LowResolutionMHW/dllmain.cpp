@@ -3,9 +3,15 @@
 #include "vector"
 #include "loader.h"
 
+#ifndef LRR_TARGET_HEIGHT
+#define LRR_TARGET_HEIGHT 480
+#endif
+
+#define EXPECTED_GAME_VERSION "421740"
+
 using namespace loader;
 
-float target_height = 480;
+float target_height = LRR_TARGET_HEIGHT;
 
 void PatchBytes(uintptr_t address, const std::vector<BYTE>& bytes);
 DWORD WINAPI DllThread(LPVOID hDll);
@@ -29,9 +35,14 @@ BOOL APIENTRY DllMain( HMODULE hModule,
     if (ul_reason_for_call == DLL_PROCESS_ATTACH)
     {
         LOG(INFO) << "Game version is " << GameVersion;
+        if (strcmp(GameVersion, EXPECTED_GAME_VERSION) != 0) {
+            LOG(ERR) << "LowResolutionMHW: Game version mismatch, the game must have been updated, please update the plugin! (game v.: " << GameVersion << ", expected v.: " << EXPECTED_GAME_VERSION << ")";
+            return false;
+        }
 
         // Start message
         LOG(DEBUG) << "Started LowResolutionMHW";
+        LOG(INFO) << "LowResolutionMHW: Running the plugin at default " << target_height << " height";
 
         // Check filename to see what percentage to set the thing to
         LOG(DEBUG) << "LowResolutionMHW: Checking if there's a valid res_scaling.";
@@ -97,17 +108,26 @@ DWORD WINAPI DllThread(LPVOID hDll)
         // Patch logic that limits res scaling to be 0.5 to 1.0
         LOG(DEBUG) << "LowResolutionMHW: Patching resolution scale clamping code...";
 
-        PatchBytes(0x142296F9B, { 0x0F, 0x2F, 0xC9 });
-        PatchBytes(0x142296FAB, { 0x0F, 0x2F, 0xC9 });
-        PatchBytes(0x142296FAE, { 0x77, 0x03 });
+        // Master Resolution Scaling Clamp Patch
+        // - Allows going below 50% resolution scale
 
-        PatchBytes(0x14255C328, { 0x0F, 0x2F, 0xC9 });
-        PatchBytes(0x14255C333, { 0x77, 0x0A });
-        PatchBytes(0x14255C335, { 0x0F, 0x2F, 0xC9 });
-        PatchBytes(0x14255C338, { 0x73, 0x08 });
-        PatchBytes(0x14255C352, { 0x0F, 0x2F, 0xC9 });
-        PatchBytes(0x14255C355, { 0x77, 0x18 });
-        PatchBytes(0x14255C357, { 0x0F, 0x2F, 0xC9 });
+        // 0x 142296F9B  ->  0x 142296FFB 
+        uintptr_t offset = 0x142296FFB;
+        uintptr_t localOffset = 0;
+        PatchBytes(offset, { 0x0F, 0x2F, 0xC9 });
+        PatchBytes(offset + (localOffset += 16), {0x0F, 0x2F, 0xC9}); // 16 bytes after (13 if after last)
+        PatchBytes(offset + (localOffset += 3), { 0x77, 0x03 }); // 3 bytes after (just after the last command)
+
+        // 0x 14255C328 ->? 0x 14255C388 (0x 2C538D from start of last block)
+        offset += 0x2C538D;
+        localOffset = 0;
+        PatchBytes(offset, { 0x0F, 0x2F, 0xC9 }); // 0x 2C538D distance from last block start
+        PatchBytes(offset + (localOffset += 11), { 0x77, 0x0A }); // 11 bytes (8 if after last)
+        PatchBytes(offset + (localOffset += 2), { 0x0F, 0x2F, 0xC9 }); // just after
+        PatchBytes(offset + (localOffset += 3), { 0x73, 0x08 }); // just after
+        PatchBytes(offset + (localOffset += 26), { 0x0F, 0x2F, 0xC9 }); // 26 bytes (24 if after last)
+        PatchBytes(offset + (localOffset += 3), { 0x77, 0x18 }); // just after
+        PatchBytes(offset + (localOffset += 2), { 0x0F, 0x2F, 0xC9 }); // just after
 
         LOG(DEBUG) << "LowResolutionMHW: Finished patching resolution scale clamping code!";
 
