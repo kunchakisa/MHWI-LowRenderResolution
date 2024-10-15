@@ -7,7 +7,7 @@
 #define LRR_TARGET_HEIGHT 480
 #endif
 
-#define EXPECTED_GAME_VERSION "421740"
+#define EXPECTED_GAME_VERSION "421810"
 
 using namespace loader;
 
@@ -92,15 +92,21 @@ BOOL APIENTRY DllMain( HMODULE hModule,
 DWORD WINAPI DllThread(LPVOID hDll)
 {
     LOG(DEBUG) << "LowResolutionMHW: Thread Started. Waiting for res_scaling pointer to be valid";
-    float* game_res_scale = ReadMultiLevelPointerSafe<float>((void*)0x1451C2240, { 0x1F0 });
-    LOG(DEBUG) << "LowResolutionMHW: res_scaling pointer valid. Getting height dimension of the game";
-    int* game_width = ReadMultiLevelPointerSafe<int>((void*)0x1451C2240, { 0x190 });
-    int* game_height = ReadMultiLevelPointerSafe<int>((void*)0x1451C2240, { 0x194 });
-    LOG(INFO) << "LowResolutionMHW: Game is running at "<<*game_width<<"x"<<*game_height;
+    float* game_res_scale = ReadMultiLevelPointerSafe<float>((void*)0x1451C4480, { 0x1F0 });
+    LOG(DEBUG) << "LowResolutionMHW: res_scaling pointer valid. (" << std::hex << std::showbase << reinterpret_cast<uintptr_t>(game_res_scale) << ") Getting height dimension of the game";
+    int* game_width = ReadMultiLevelPointerSafe<int>((void*)0x1451C4480, { 0x190 });
+    LOG(DEBUG) << "LowResolutionMHW: width pointer valid. (" << std::hex << std::showbase << reinterpret_cast<uintptr_t>(game_width) << ")";
+    int* game_height = ReadMultiLevelPointerSafe<int>((void*)0x1451C4480, { 0x194 });
+    LOG(DEBUG) << "LowResolutionMHW: height pointer valid. (" << std::hex << std::showbase << reinterpret_cast<uintptr_t>(game_height) << ")";
+    while (*game_width < 1 && *game_height < 1) {
+        LOG(DEBUG) << "LowResolutionMHW: width or height value was invalid. Retrying in 1s...";
+        Sleep(1000);
+    }
+    LOG(INFO) << "LowResolutionMHW: Game is running at " << *game_width << "x" << *game_height;
     // Calculate res_scaling from the target height
     float res_scaling = target_height / *game_height;
     if (res_scaling > 1.0) {
-        LOG(INFO) << "LowResolutionMHW: Target height (" << target_height << ") is bigger than game height (" << game_height << "). Plugin will stop";
+        LOG(INFO) << "LowResolutionMHW: Target height (" << target_height << ") is bigger than game height (" << *game_height << "). Plugin will stop";
     }
     else {
         LOG(INFO) << "LowResolutionMHW: Now locking the res_scaling value to " << res_scaling;
@@ -111,14 +117,14 @@ DWORD WINAPI DllThread(LPVOID hDll)
         // Master Resolution Scaling Clamp Patch
         // - Allows going below 50% resolution scale
 
-        // 0x 142296F9B  ->  0x 142296FFB 
-        uintptr_t offset = 0x142296FFB;
+        // 0x 142296F9B  ->  0x 142296FFB  ->  0x 14229837B 
+        uintptr_t offset = 0x14229837B;
         uintptr_t localOffset = 0;
         PatchBytes(offset, { 0x0F, 0x2F, 0xC9 });
         PatchBytes(offset + (localOffset += 16), {0x0F, 0x2F, 0xC9}); // 16 bytes after (13 if after last)
         PatchBytes(offset + (localOffset += 3), { 0x77, 0x03 }); // 3 bytes after (just after the last command)
 
-        // 0x 14255C328 ->? 0x 14255C388 (0x 2C538D from start of last block)
+        // 0x 14255C328  ->  0x 14255C388  ->  0x 14255D708 (0x 2C538D from start of last block)
         offset += 0x2C538D;
         localOffset = 0;
         PatchBytes(offset, { 0x0F, 0x2F, 0xC9 }); // 0x 2C538D distance from last block start
